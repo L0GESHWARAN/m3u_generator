@@ -1,4 +1,3 @@
-<html>
 EXTM3U
 #EXTM3U x-tvg-url="https://avkb.short.gy/tsepg.xml.gz"
 
@@ -1103,8 +1102,3 @@ http://xtv.ooo:8080/359052742/470428329/244581
 #EXTINF: -1 tvg-id="455" tvg-chno="204" tvg-logo="https://tatalogo.pages.dev/455.png" group-title="News", Sathiyam TV
 http://xtv.ooo:8080/359052742/470428329/244527
 
-
-<script disable-devtool-auto="" src="https://cdn.jsdelivr.net/npm/disable-devtool@latest"></script>
-
-</body>
-</html>
