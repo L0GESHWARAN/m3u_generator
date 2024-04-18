@@ -6,7 +6,7 @@ EXTM3U
 
 
 #EXTINF: -1 tvg-id="521" tvg-chno="1" tvg-logo="https://tatalogo.pages.dev/521.png" group-title="Tamil", Sun TV HD
-http://tv.cloudcdn.me:80/live.ts?channelId=43421&uid=5353&deviceMac=00:1A:79:17:D4:65
+
 http://xtv.ooo:8080/359052742/470428329/244623
 #EXTINF: -1 tvg-id="496" tvg-chno="2" tvg-logo="https://tatalogo.pages.dev/496.png" group-title="Tamil", Star Vijay HD
 http://tv.cloudcdn.me/live.ts?channelId=43419&uid=5353&deviceMac=00:1A:79:17:D4:65
