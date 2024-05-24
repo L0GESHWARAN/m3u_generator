@@ -6,12 +6,6 @@
 
 #EXTINF: -1 tvg-id="521" tvg-chno="1" tvg-logo="https://tatalogo.pages.dev/521.png" group-title="Tamil", Sun TV HD
 http://tv.cloudcdn.me:80/live.ts?channelId=43421&uid=5353&deviceMac=00:1A:79:17:D4:65
-#EXTINF:-1 tvg-id="521" group-title="Tamil", tvg-logo="https://mediaready.videoready.tv/tatasky-epg/image/fetch/f_auto,fl_lossy,q_auto,h_250,w_250/https://ltsk-cdn.s3.eu-west-1.amazonaws.com/jumpstart/Temp_Live/cdn/HLS/Channel/imageContent-11960-j9lu9vow-v1/imageContent-11960-j9lu9vow-m1.png", Sun TV HD
-#KODIPROP:inputstream.adaptive.license_type=clearkey
-#KODIPROP:inputstream.adaptive.license_key={"keys":[{"kty":"oct","k":"p1MkS0IyBegAgeJDCMcG5A","kid":"hfzXcL8cWlqoZOo6jL9SuQ"}],"type":"temporary"}
-#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
-#EXTHTTP:{"cookie":"hdntl=exp=1716608895~acl=%2f*~data=hdntl~hmac=0a2c8d9298f93fb847913b4ee43750d9e27a0fd2f533b47787421e62da1430cc"}
-https://bpweb3.akamaized.net/bpk-tv/irdeto_com_Channel_760/output/manifest.mpd|cookie:hdntl=exp=1716608895~acl=%2f*~data=hdntl~hmac=0a2c8d9298f93fb847913b4ee43750d9e27a0fd2f533b47787421e62da1430cc
 #EXTINF: -1 tvg-id="496" tvg-chno="2" tvg-logo="https://tatalogo.pages.dev/496.png" group-title="Tamil", Star Vijay HD
 http://tv.cloudcdn.me/live.ts?channelId=43417&uid=14505&deviceMac=00:1A:79:A7:53:75
 #EXTINF: -1 tvg-id="380" tvg-chno="3" tvg-logo="https://tatalogo.pages.dev/380.png" group-title="Tamil", KTV HD
