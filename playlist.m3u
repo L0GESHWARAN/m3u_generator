@@ -6,8 +6,6 @@
 
 #EXTINF: -1 tvg-id="521" tvg-chno="1" tvg-logo="https://tatalogo.pages.dev/521.png" group-title="Tamil", Sun TV HD
 http://tv.cloudcdn.me:80/live.ts?channelId=43421&uid=5353&deviceMac=00:1A:79:17:D4:65
-#EXTINF:-1 tvg-ID="" tvg-name=" TAMIL: SUN TV HD" tvg-logo="" group-title="Tamil", TAMIL: SUNs TV HD
-http://sansat.net:25461/fatahsaybi/IC1BSLZU0T/100157
 #EXTINF: -1 tvg-id="496" tvg-chno="2" tvg-logo="https://tatalogo.pages.dev/496.png" group-title="Tamil", Star Vijay HD
 http://tv.cloudcdn.me/live.ts?channelId=43417&uid=14505&deviceMac=00:1A:79:A7:53:75
 #EXTINF: -1 tvg-id="380" tvg-chno="3" tvg-logo="https://tatalogo.pages.dev/380.png" group-title="Tamil", KTV HD
