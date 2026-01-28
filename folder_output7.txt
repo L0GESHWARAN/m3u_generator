@@ -1,1465 +1,282 @@
-shift-roster-agent/
-  folder_output7.txt [Skipped: this is the output file]
-  requirements.txt
-    --- CODE START ---
-    langchain
-    langchain-openai
-    langgraph
-    python-dotenv
-    pytz
-    streamlit
-    --- CODE END ---
-  streamlit_app.py
-    --- CODE START ---
-    import streamlit as st
-    from app.graph import build_graph
-    from app.state import ShiftState
-    from app.helper import is_assistant_echo
-    
-    
-    def init_session():
-        if "graph" not in st.session_state:
-            st.session_state.graph = build_graph()
-        if "state" not in st.session_state:
-            st.session_state.state = ShiftState()
-        if "user_input" not in st.session_state:
-            st.session_state.user_input = ""
-    
-    
-    def reset_session():
-        st.session_state.graph = build_graph()
-        st.session_state.state = ShiftState()
-        st.session_state.user_input = ""
-    
-    
-    def send_message(user_text: str):
-        state = st.session_state.state
-    
-        # guard: ignore short assistant echoes
-        if is_assistant_echo(user_text):
-            state.final_output = "🙂 You can tell me what you want to do."
-            state.conversation_history.append({"role": "assistant", "content": state.final_output})
-            return state.final_output
-    
-        # save user
-        state.user_input = user_text
-        state.final_output = None
-        state.conversation_history.append({"role": "user", "content": user_text})
-    
-        try:
-            result = st.session_state.graph.invoke(state)
-        except Exception as e:
-            err = f"Error invoking graph: {e}"
-            state.conversation_history.append({"role": "assistant", "content": err})
-            return err
-    
-        assistant_reply = result.get("final_output", "")
-        state.conversation_history.append({"role": "assistant", "content": assistant_reply})
-    
-        return assistant_reply
-    
-    
-    # --------------------
-    # Streamlit layout
-    # --------------------
-    init_session()
-    
-    st.set_page_config(page_title="Shift Roster Assistant", layout="wide")
-    st.title("Shift Roster Assistant 🤖📅")
-    st.write("Use the input below to ask the assistant to generate or modify shift rosters.")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # Conversation / Input
-        st.subheader("Conversation")
-    
-        # Show conversation history
-        chat_container = st.container()
-        with chat_container:
-            for msg in st.session_state.state.conversation_history:
-                role = msg.get("role")
-                content = msg.get("content", "")
-                if role == "user":
-                    st.markdown(f"**You:** {content}")
-                else:
-                    # assistant content may contain markdown (schedule tables)
-                    st.markdown(f"**Assistant:**\n{content}")
-    
-        # Input
-        user_text = st.text_input("Your message", value=st.session_state.user_input, key="input_box")
-        send = st.button("Send")
-    
-        if send and user_text:
-            st.session_state.user_input = ""
-            reply = send_message(user_text)
-            # Rerun to show updated conversation
-            # Guarded rerun: call experimental_rerun if available, otherwise toggle a session flag
-            if hasattr(st, "experimental_rerun"):
-                st.experimental_rerun()
-            else:
-                st.session_state._rerun = not st.session_state.get("_rerun", False)
-    
-    with col2:
-        st.subheader("Session")
-        st.markdown(f"**Pattern:** {st.session_state.state.pattern}")
-        st.markdown(f"**Weeks:** {st.session_state.state.weeks}")
-        st.markdown(f"**Weeks confirmed:** {st.session_state.state.weeks_confirmed}")
-        st.markdown(f"**Holidays:** {st.session_state.state.holidays}")
-        st.markdown(f"**Leaves:** {st.session_state.state.leaves}")
-    
-        if st.button("Reset session"):
-            reset_session()
-            if hasattr(st, "experimental_rerun"):
-                st.experimental_rerun()
-            else:
-                st.session_state._rerun = not st.session_state.get("_rerun", False)
-    
-    
-    # Footer / Tips
-    st.markdown("---")
-    st.markdown(
-        "#### Tips\n"
-        "• Try: `Generate 24x7 for 2 weeks`\n"
-        "• Ask to add holidays or leaves (e.g. `P2 on leave Wednesday`)\n"
-    )
-    --- CODE END ---
-  test.py
-    --- CODE START ---
-    import os
-    
-    def export_folder_structure(
-        root_dir,
-        output_file="output.txt",
-        include_file_content=True,
-        max_file_size_kb=500,
-        skip_dirs=None
-    ):
-        """
-        Walk through folders and files and write structure + code to a file.
-        """
-    
-        if skip_dirs is None:
-            skip_dirs = {".venv"}
-    
-        # Normalize absolute paths for safe comparison
-        root_dir = os.path.abspath(root_dir)
-        output_file = os.path.abspath(output_file)
-    
-        with open(output_file, "w", encoding="utf-8") as out:
-            for root, dirs, files in os.walk(root_dir, followlinks=False):
-                # Modify dirs in-place to skip unwanted directories
-                dirs[:] = sorted([d for d in dirs if d not in skip_dirs])
-    
-                level = os.path.abspath(root).replace(root_dir, "", 1).count(os.sep)
-                indent = "  " * level
-    
-                # Write folder name
-                out.write(f"{indent}{os.path.basename(root)}/\n")
-    
-                sub_indent = "  " * (level + 1)
-    
-                for file in sorted(files):
-                    file_path = os.path.abspath(os.path.join(root, file))
-    
-                    # 🔒 IMPORTANT: Skip the output file to avoid self-appending recursion
-                    if file_path == output_file:
-                        out.write(f"{sub_indent}{file} [Skipped: this is the output file]\n")
-                        continue
-    
-                    out.write(f"{sub_indent}{file}\n")
-    
-                    if include_file_content:
-                        try:
-                            size_kb = os.path.getsize(file_path) / 1024.0
-                            # ✅ Fix the operator (was &gt;)
-                            if size_kb > max_file_size_kb:
-                                out.write(f"{sub_indent}  [Skipped: file too large ({size_kb:.1f} KB)]\n")
-                                continue
-    
-                            # Read as text; ignore undecodable bytes
-                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                                out.write(f"{sub_indent}  --- CODE START ---\n")
-                                for line in f:
-                                    out.write(f"{sub_indent}  {line}")
-                                # Ensure newline before end marker if last line had no newline
-                                if not line.endswith("\n"):
-                                    out.write("\n")
-                                out.write(f"{sub_indent}  --- CODE END ---\n")
-                        except Exception as e:
-                            out.write(f"{sub_indent}  [Error reading file: {e}]\n")
-    
-    
-    if __name__ == "__main__":
-        folder_to_scan = r"C:\Users\logeshwaran.m\PycharmProjects\shift-roster-agent"
-    
-        export_folder_structure(
-            root_dir=folder_to_scan,
-            # 👉 Prefer placing the output OUTSIDE the scanned folder to be extra safe:
-            # output_file=r"C:\Users\logeshwaran.m\folder_output7.txt",
-            output_file="folder_output7.txt",
-            include_file_content=True,
-            max_file_size_kb=500,
-            skip_dirs={".venv", ".git", "__pycache__"}
-        )
-    --- CODE END ---
-  .idea/
-    .gitignore
-      --- CODE START ---
-      # Default ignored files
-      /shelf/
-      /workspace.xml
-      # Editor-based HTTP Client requests
-      /httpRequests/
-      --- CODE END ---
-    ai_toolkit.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="AI Toolkit Settings">
-          <option name="importsOfInterestPresent" value="true" />
-        </component>
-      </project>
-      --- CODE END ---
-    copilot.data.migration.agent.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="AgentMigrationStateService">
-          <option name="migrationStatus" value="COMPLETED" />
-        </component>
-      </project>
-      --- CODE END ---
-    copilot.data.migration.ask.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="AskMigrationStateService">
-          <option name="migrationStatus" value="COMPLETED" />
-        </component>
-      </project>
-      --- CODE END ---
-    copilot.data.migration.ask2agent.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="Ask2AgentMigrationStateService">
-          <option name="migrationStatus" value="COMPLETED" />
-        </component>
-      </project>
-      --- CODE END ---
-    copilot.data.migration.edit.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="EditMigrationStateService">
-          <option name="migrationStatus" value="COMPLETED" />
-        </component>
-      </project>
-      --- CODE END ---
-    misc.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="Black">
-          <option name="sdkName" value="Python 3.9 (shift-roster-agent)" />
-        </component>
-      </project>
-      --- CODE END ---
-    modules.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="ProjectModuleManager">
-          <modules>
-            <module fileurl="file://$PROJECT_DIR$/.idea/shift-roster-agent.iml" filepath="$PROJECT_DIR$/.idea/shift-roster-agent.iml" />
-          </modules>
-        </component>
-      </project>
-      --- CODE END ---
-    shift-roster-agent.iml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <module type="PYTHON_MODULE" version="4">
-        <component name="NewModuleRootManager">
-          <content url="file://$MODULE_DIR$">
-            <excludeFolder url="file://$MODULE_DIR$/.venv" />
-          </content>
-          <orderEntry type="jdk" jdkName="Python 3.9 (shift-roster-agent)" jdkType="Python SDK" />
-          <orderEntry type="sourceFolder" forTests="false" />
-        </component>
-      </module>
-      --- CODE END ---
-    workspace.xml
-      --- CODE START ---
-      <?xml version="1.0" encoding="UTF-8"?>
-      <project version="4">
-        <component name="AutoImportSettings">
-          <option name="autoReloadType" value="SELECTIVE" />
-        </component>
-        <component name="ChangeListManager">
-          <list default="true" id="b3423c51-6a2f-4dda-8c28-d028be5cd0da" name="Changes" comment="" />
-          <option name="SHOW_DIALOG" value="false" />
-          <option name="HIGHLIGHT_CONFLICTS" value="true" />
-          <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
-          <option name="LAST_RESOLUTION" value="IGNORE" />
-        </component>
-        <component name="FileTemplateManagerImpl">
-          <option name="RECENT_TEMPLATES">
-            <list>
-              <option value="Python Script" />
-            </list>
-          </option>
-        </component>
-        <component name="ProjectColorInfo">{
-        &quot;associatedIndex&quot;: 8
-      }</component>
-        <component name="ProjectId" id="37sDDPODbkWOOIFTfNqmLhzsQID" />
-        <component name="ProjectViewState">
-          <option name="hideEmptyMiddlePackages" value="true" />
-          <option name="showLibraryContents" value="true" />
-        </component>
-        <component name="PropertiesComponent">{
-        &quot;keyToString&quot;: {
-          &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-          &quot;Python.app.executor&quot;: &quot;Run&quot;,
-          &quot;Python.main.executor&quot;: &quot;Run&quot;,
-          &quot;Python.test.executor&quot;: &quot;Run&quot;,
-          &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-          &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager&quot;: &quot;true&quot;
-        }
-      }</component>
-        <component name="RecentsManager">
-          <key name="MoveFile.RECENT_KEYS">
-            <recent name="C:\Users\logeshwaran.m\PycharmProjects\shift-roster-agent" />
-            <recent name="C:\Users\logeshwaran.m\PycharmProjects\shift-roster-agent\app" />
-          </key>
-        </component>
-        <component name="RunManager" selected="Python.test">
-          <configuration name="app" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-            <module name="shift-roster-agent" />
-            <option name="ENV_FILES" value="" />
-            <option name="INTERPRETER_OPTIONS" value="" />
-            <option name="PARENT_ENVS" value="true" />
-            <envs>
-              <env name="PYTHONUNBUFFERED" value="1" />
-            </envs>
-            <option name="SDK_HOME" value="" />
-            <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-            <option name="IS_MODULE_SDK" value="true" />
-            <option name="ADD_CONTENT_ROOTS" value="true" />
-            <option name="ADD_SOURCE_ROOTS" value="true" />
-            <option name="SCRIPT_NAME" value="C:\Users\logeshwaran.m\PycharmProjects\shift-roster-agent\app.py" />
-            <option name="PARAMETERS" value="" />
-            <option name="SHOW_COMMAND_LINE" value="false" />
-            <option name="EMULATE_TERMINAL" value="false" />
-            <option name="MODULE_MODE" value="false" />
-            <option name="REDIRECT_INPUT" value="false" />
-            <option name="INPUT_FILE" value="" />
-            <method v="2" />
-          </configuration>
-          <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-            <module name="shift-roster-agent" />
-            <option name="ENV_FILES" value="" />
-            <option name="INTERPRETER_OPTIONS" value="" />
-            <option name="PARENT_ENVS" value="true" />
-            <envs>
-              <env name="PYTHONUNBUFFERED" value="1" />
-            </envs>
-            <option name="SDK_HOME" value="" />
-            <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app" />
-            <option name="IS_MODULE_SDK" value="true" />
-            <option name="ADD_CONTENT_ROOTS" value="true" />
-            <option name="ADD_SOURCE_ROOTS" value="true" />
-            <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/main.py" />
-            <option name="PARAMETERS" value="" />
-            <option name="SHOW_COMMAND_LINE" value="false" />
-            <option name="EMULATE_TERMINAL" value="false" />
-            <option name="MODULE_MODE" value="false" />
-            <option name="REDIRECT_INPUT" value="false" />
-            <option name="INPUT_FILE" value="" />
-            <method v="2" />
-          </configuration>
-          <configuration name="test" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-            <module name="shift-roster-agent" />
-            <option name="ENV_FILES" value="" />
-            <option name="INTERPRETER_OPTIONS" value="" />
-            <option name="PARENT_ENVS" value="true" />
-            <envs>
-              <env name="PYTHONUNBUFFERED" value="1" />
-            </envs>
-            <option name="SDK_HOME" value="" />
-            <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-            <option name="IS_MODULE_SDK" value="true" />
-            <option name="ADD_CONTENT_ROOTS" value="true" />
-            <option name="ADD_SOURCE_ROOTS" value="true" />
-            <option name="SCRIPT_NAME" value="$PROJECT_DIR$/test.py" />
-            <option name="PARAMETERS" value="" />
-            <option name="SHOW_COMMAND_LINE" value="false" />
-            <option name="EMULATE_TERMINAL" value="false" />
-            <option name="MODULE_MODE" value="false" />
-            <option name="REDIRECT_INPUT" value="false" />
-            <option name="INPUT_FILE" value="" />
-            <method v="2" />
-          </configuration>
-          <recent_temporary>
-            <list>
-              <item itemvalue="Python.test" />
-              <item itemvalue="Python.main" />
-            </list>
-          </recent_temporary>
-        </component>
-        <component name="SharedIndexes">
-          <attachedChunks>
-            <set>
-              <option value="bundled-python-sdk-41e8cd69c857-64d779b69b7a-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-251.26927.90" />
-            </set>
-          </attachedChunks>
-        </component>
-        <component name="TaskManager">
-          <task active="true" id="Default" summary="Default task">
-            <changelist id="b3423c51-6a2f-4dda-8c28-d028be5cd0da" name="Changes" comment="" />
-            <created>1767682764580</created>
-            <option name="number" value="Default" />
-            <option name="presentableId" value="Default" />
-            <updated>1767682764580</updated>
-          </task>
-          <servers />
-        </component>
-      </project>
-      --- CODE END ---
-    inspectionProfiles/
-      profiles_settings.xml
-        --- CODE START ---
-        <component name="InspectionProjectProfileManager">
-          <settings>
-            <option name="USE_PROJECT_PROFILE" value="false" />
-            <version value="1.0" />
-          </settings>
-        </component>
-        --- CODE END ---
-  app/
-    graph.py
-      --- CODE START ---
-      from langgraph.graph import StateGraph
-      from app.state import ShiftState
-      
-      # Nodes
-      from app.nodes.llm_intent import llm_intent_node
-      from app.nodes.parser import parse_input
-      from app.nodes.router import route_pattern
-      from app.nodes.validator import validate_schedule
-      from app.nodes.renderer import render_output
-      from app.nodes.conversation_controller import conversation_controller
-      # Patterns
-      from app.patterns.pattern_a_24x7 import build_pattern_a
-      from app.patterns.pattern_b_24x5 import build_pattern_b
-      from app.patterns.pattern_c_16x5 import build_pattern_c
-      
-      # Modules
-      from app.modules.rotation_24x7 import rotate_24x7
-      from app.modules.holidays import apply_holidays
-      from app.modules.leave_adjustment import apply_leaves
-      
-      
-      def build_graph():
-          graph = StateGraph(ShiftState)
-      
-          # Nodes
-          graph.add_node("conversation", conversation_controller)
-          graph.add_node("parse", parse_input)
-      
-          graph.add_node("pattern_a", build_pattern_a)
-          graph.add_node("pattern_b", build_pattern_b)
-          graph.add_node("pattern_c", build_pattern_c)
-      
-          graph.add_node("rotate_24x7", rotate_24x7)
-          graph.add_node("holiday", apply_holidays)
-          graph.add_node("leave", apply_leaves)
-          graph.add_node("validate", validate_schedule)
-          graph.add_node("render", render_output)
-      
-          # Entry
-          graph.set_entry_point("conversation")
-      
-          # 🔀 Conversation decides next step
-          graph.add_conditional_edges(
-              "conversation",
-              lambda state: state.next_node,
-              {
-                  "parse": "parse",
-                  "leave": "leave",
-                  "render": "render",
-              },
-          )
-      
-          # Pattern routing
-          graph.add_conditional_edges(
-              "parse",
-              route_pattern,
-              {
-                  "pattern_a": "pattern_a",
-                  "pattern_b": "pattern_b",
-                  "pattern_c": "pattern_c",
-              },
-          )
-      
-          # Flow
-          graph.add_edge("pattern_a", "rotate_24x7")
-          graph.add_edge("rotate_24x7", "holiday")
-      
-          graph.add_edge("pattern_b", "holiday")
-          graph.add_edge("pattern_c", "holiday")
-      
-          graph.add_edge("holiday", "leave")
-          graph.add_edge("leave", "validate")
-          graph.add_edge("validate", "render")
-      
-          graph.set_finish_point("render")
-      
-          return graph.compile()
-      --- CODE END ---
-    helper.py
-      --- CODE START ---
-      def is_assistant_echo(text: str) -> bool:
-          return text.strip().lower() in {"yes", "yeah", "yep", "ok", "okay"}
-      --- CODE END ---
-    main.py
-      --- CODE START ---
-      from app.graph import build_graph
-      from app.state import ShiftState
-      from app.helper import is_assistant_echo
-      
-      
-      def main():
-          graph = build_graph()
-          state = ShiftState()
-      
-          print("Shift Roster Assistant (type 'exit' to quit)\n")
-      
-          while True:
-              user_query = input("Enter your scheduling request: ").strip()
-      
-              if user_query.lower() in {"exit", "quit"}:
-                  print("Goodbye 👋")
-                  break
-      
-              # Save user input
-              state.user_input = user_query
-              state.final_output = None
-      
-              # Ignore assistant echoes
-              if is_assistant_echo(user_query):
-                  print("🙂 You can tell me what you want to do.")
-                  continue
-      
-              # 🔥 ADD USER MESSAGE TO HISTORY
-              state.conversation_history.append({
-                  "role": "user",
-                  "content": user_query
-              })
-      
-              result = graph.invoke(state)
-              assistant_reply = result["final_output"]
-      
-              # 🔥 ADD ASSISTANT MESSAGE TO HISTORY
-              state.conversation_history.append({
-                  "role": "assistant",
-                  "content": assistant_reply
-              })
-      
-              print(assistant_reply)
-              print()
-      
-      
-      if __name__ == "__main__":
-          main()
-      --- CODE END ---
-    state.py
-      --- CODE START ---
-      from dataclasses import dataclass, field
-      from typing import Dict, List, Optional
-      from datetime import datetime, timedelta
-      
-      
-      @dataclass
-      class ShiftState:
-          conversation_history: List[Dict[str, str]] = field(default_factory=list)
-      
-          user_input: Optional[str] = None
-          pattern: Optional[str] = None
-          weeks: int = 0
-          weeks_confirmed: bool = False
-      
-          holidays: List[str] = field(default_factory=list)
-          leaves: Dict = field(default_factory=dict)
-      
-          people: List[str] = field(
-              default_factory=lambda: ["P1", "P2", "P3", "P4", "P5", "P6"]
-          )
-      
-          final_schedule: List[Dict] = field(default_factory=list)
-          adjustment_log: List[str] = field(default_factory=list)
-      
-          final_output: Optional[str] = None
-      
-          # 🧠 Conversational routing
-          next_node: Optional[str] = None
-      
-          start_date: datetime = field(
-              default_factory=lambda: (
-                  datetime.now() - timedelta(days=datetime.now().weekday())
-              )
-          )
-          day_delta: timedelta = field(default_factory=lambda: timedelta(days=1))
-      --- CODE END ---
-    config/
-      people.py
-        --- CODE START ---
-        PEOPLE_MAP = {
-                    "P1": "Mayur Bodkhe",
-                    "P2": "Mithub Kumar Kandagatla",
-                    "P3": "Kishan Singh Bagga",
-                    "P4": "Kunta Bhargav Sai",
-                    "P5": "Gaurav Tikar",
-                    "P6": "Buffer"
-                }
-        --- CODE END ---
-    llm/
-      azure_client.py
-        --- CODE START ---
-        from openai import AzureOpenAI
-        import os
-        os.environ["AZURE_OPENAI_API_KEY"] = "f27856eb72df4e37b8926a39ad2e5af6"
-        os.environ["AZURE_OPENAI_ENDPOINT"] = 'https://e360-ai.openai.azure.com/'
-        # os.environ['OPENAI_API_VERSION'] = get_vault_secret('chatbot-api-version')#"2023-05-15"
-        
-        client = AzureOpenAI(
-            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            api_version="2024-02-15-preview",
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        )
-        
-        DEPLOYMENT_NAME = "gpt-4o"
-        
-        --- CODE END ---
-      fallback_parser.py
-        --- CODE START ---
-        import re
-        
-        
-        def fallback_parse_intent(user_query: str) -> dict:
-            text = user_query.lower()
-            if text.isdigit():
-                return {
-                    "service_type": None,
-                    "weeks": int(text),
-                    "leaves": {},
-                    "holidays": [],
-                }
-            # ─────────────────────────
-            # Service type
-            # ─────────────────────────
-            if "24x7" in text or "24×7" in text:
-                service_type = "24x7"
-            elif "24x5" in text or "24×5" in text:
-                service_type = "24x5"
-            elif "16x5" in text or "16×5" in text:
-                service_type = "16x5"
-            else:
-                raise ValueError("Unable to detect service type")
-        
-            # ─────────────────────────
-            # Weeks
-            # ─────────────────────────
-            match = re.search(r"(\d+)\s*week", text)
-            weeks = int(match.group(1)) if match else 1
-        
-            return {
-                "service_type": service_type,
-                "weeks": weeks,
-                "leaves": {},
-                "holidays": [],
-            }
-        --- CODE END ---
-      intent_parser.py
-        --- CODE START ---
-        import json
-        from app.llm.azure_client import client, DEPLOYMENT_NAME
-        from app.llm.intent_prompt import SYSTEM_PROMPT
-        from app.llm.fallback_parser import fallback_parse_intent
-        
-        
-        def parse_intent(user_query: str, history: list) -> dict:
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            messages.extend(history)
-            messages.append({"role": "user", "content": user_query})
-        
-            response = client.chat.completions.create(
-                model=DEPLOYMENT_NAME,
-                messages=messages,
-                temperature=0
-            )
-        
-            content = response.choices[0].message.content.strip()
-            return json.loads(content)
-        --- CODE END ---
-      intent_prompt.py
-        --- CODE START ---
-        SYSTEM_PROMPT = """
-                You are an intent classifier for a shift roster assistant.
-        
-                Classify the user's intent and extract data.
-        
-                Return ONLY valid JSON in this format:
-        
-                {
-                  "intent_type": "create_schedule | clarify_weeks | add_leave | add_holiday | update_weeks | explain | reset | unknown",
-                  "service_type": "24x7 | 24x5 | 16x5 | null",
-                  "weeks": number | null,
-                  "leaves": { "P2": "Wed" },
-                  "holidays": ["15 Jan"]
-                }
-        
-                Rules:
-                - Use create_schedule only when user wants a new roster
-                - Use clarify_weeks when user only gives a number
-                - Use add_leave / add_holiday only if modifying existing schedule
-                - If unsure, intent_type = unknown
-                - No explanations, no extra text
-                """
-        --- CODE END ---
-      output_formatter.py
-        --- CODE START ---
-        from app.llm.azure_client import client, DEPLOYMENT_NAME
-        from app.config.people import PEOPLE_MAP
-        
-        FORMAT_PROMPT = """
-                You are a formatter.
-        
-                Rules:
-                - Do NOT change assignments
-                - Do NOT invent people
-                - Replace P-codes using the mapping
-                - Improve readability
-                - Keep dates, shifts, and structure intact
-                """
-        
-        
-        def format_schedule(raw_output: str) -> str:
-            mapping_text = "\n".join(
-                f"{k} = {v}" for k, v in PEOPLE_MAP.items()
-            )
-        
-            response = client.chat.completions.create(
-                model=DEPLOYMENT_NAME,
-                messages=[
-                    {"role": "system", "content": FORMAT_PROMPT},
-                    {"role": "user", "content": f"""
-                Mapping:
-                {mapping_text}
-        
-                Schedule:
-                {raw_output}
-                """}
-                ],
-                temperature=0,
-            )
-        
-            return response.choices[0].message.content.strip()
-        --- CODE END ---
-    modules/
-      holidays.py
-        --- CODE START ---
-        def apply_holidays(state):
-            for holiday in state.holidays:
-                state.adjustment_log.append(
-                    f"{holiday}: Holiday checks only at 11:00, 16:00, 22:00 IST"
-                )
-            return state
-        --- CODE END ---
-      leave_adjustment.py
-        --- CODE START ---
-        BUFFER_PRIORITY = ["P4", "P3", "P5", "P2"]
-        
-        def apply_leaves(state):
-            """
-            Apply planned leaves using buffer priority.
-            - Replaces the absent person with a buffer
-            - Logs adjustments
-            - Returns state (CRITICAL for LangGraph)
-            """
-        
-            if not state.leaves or not state.final_schedule:
-                return state
-        
-            for person, day in state.leaves.items():
-                for week in state.final_schedule:
-        
-                    # Defensive checks
-                    if not isinstance(week, dict):
-                        continue
-                    if day not in week:
-                        continue
-        
-                    shifts = week[day]
-        
-                    for shift, assigned in shifts.items():
-                        if assigned != person:
-                            continue
-        
-                        # Find first available buffer
-                        for buffer in BUFFER_PRIORITY:
-                            shifts[shift] = buffer
-                            state.adjustment_log.append(
-                                f"{person} OFF on {day}, covered by {buffer}"
-                            )
-                            break
-        
-            return state
-        --- CODE END ---
-      rotation.py
-        --- CODE START ---
-        FOLLOW_CHAIN = {
-            "P2": "P1",
-            "P3": "P2",
-            "P4": "P3",
-            "P5": "P4",
-            "P1": "P5",
-        }
-        
-        DAY_ORDER = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
-        
-        def rotate_24x7(state):
-            if state.weeks == 1:
-                return state
-        
-            weekly_schedules = []
-            current_week = state.final_schedule
-        
-            weekly_schedules.append(current_week)
-        
-            p1_night_weeks = 0
-        
-            for week in range(2, state.weeks + 1):
-                next_week = {}
-        
-                for day in DAY_ORDER:
-                    next_week[day] = {}
-        
-                    for shift, person in current_week[day].items():
-                        # Enforce P1 7N + 4OFF
-                        if person == "P1" and shift == "🟦":
-                            if p1_night_weeks >= 1:
-                                continue
-                            p1_night_weeks += 1
-        
-                        next_week[day][shift] = FOLLOW_CHAIN.get(person, person)
-        
-                weekly_schedules.append(next_week)
-                current_week = next_week
-        
-            state.final_schedule = weekly_schedules
-            return state
-        --- CODE END ---
-      rotation_24x7.py
-        --- CODE START ---
-        FOLLOW_CHAIN = {
-            "P1": "P5",
-            "P2": "P1",
-            "P3": "P2",
-            "P4": "P3",
-            "P5": "P4",
-        }
-        
-        DAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        
-        REAL_PEOPLE = ["P1", "P2", "P3", "P4", "P5"]
-        BUFFER = "P6"
-        
-        MAX_CONSECUTIVE_NIGHTS = 5
-        
-        
-        def ordered_candidates(start_person):
-            """
-            Follow-chain order, then remaining real people
-            """
-            order = []
-            current = start_person
-        
-            while current and current not in order:
-                order.append(current)
-                current = FOLLOW_CHAIN.get(current)
-        
-            for p in REAL_PEOPLE:
-                if p not in order:
-                    order.append(p)
-        
-            return order
-        
-        
-        def rotate_24x7(state):
-            """
-            24×7 rotation engine with:
-            - Follow-chain rotation for all shifts
-            - Week-1 Night relaxation
-            - Date-based Night rest
-            - HARD RULE: Night → no Morning next day
-            - HARD RULE: iterate all real candidates before Buffer
-            - HARD RULE: max 5 consecutive Nights (APPLIES TO WEEK-1 TOO)
-            """
-        
-            if not state.final_schedule or state.weeks <= 1:
-                return state
-        
-            # ─────────────────────────────
-            # Initialize night streaks FROM WEEK-1
-            # ─────────────────────────────
-            night_streak = {p: 0 for p in REAL_PEOPLE}
-        
-            week1 = state.final_schedule[0]
-            for day in DAY_ORDER:
-                night_worker = week1[day]["🟦"]
-                for p in night_streak:
-                    if p == night_worker:
-                        night_streak[p] += 1
-                    else:
-                        night_streak[p] = 0
-        
-            last_night_worker = week1["Sun"]["🟦"]
-        
-            # ─────────────────────────────
-            # Build remaining weeks
-            # ─────────────────────────────
-            while len(state.final_schedule) < state.weeks:
-                prev_week = state.final_schedule[-1]
-                next_week = {}
-        
-                for day in DAY_ORDER:
-                    next_week[day] = {}
-        
-                    # ────────────────
-                    # MORNING (🟨)
-                    # ────────────────
-                    prev_morning = prev_week[day]["🟨"]
-                    morning_assigned = False
-        
-                    for candidate in ordered_candidates(FOLLOW_CHAIN.get(prev_morning)):
-                        # HARD RULE: Night → no Morning next day
-                        if candidate == last_night_worker:
-                            continue
-                        next_week[day]["🟨"] = candidate
-                        morning_assigned = True
-                        break
-        
-                    if not morning_assigned:
-                        next_week[day]["🟨"] = BUFFER
-        
-                    # ────────────────
-                    # AFTERNOON (🟧)
-                    # ────────────────
-                    prev_afternoon = prev_week[day]["🟧"]
-                    afternoon_assigned = False
-        
-                    for candidate in ordered_candidates(FOLLOW_CHAIN.get(prev_afternoon)):
-                        if candidate == next_week[day]["🟨"]:
-                            continue
-                        next_week[day]["🟧"] = candidate
-                        afternoon_assigned = True
-                        break
-        
-                    if not afternoon_assigned:
-                        next_week[day]["🟧"] = BUFFER
-        
-                    # ────────────────
-                    # NIGHT (🟦)
-                    # ────────────────
-                    prev_night = prev_week[day]["🟦"]
-                    night_assigned = False
-        
-                    for candidate in ordered_candidates(FOLLOW_CHAIN.get(prev_night)):
-                        if candidate in next_week[day].values():
-                            continue
-                        if night_streak.get(candidate, 0) >= MAX_CONSECUTIVE_NIGHTS:
-                            continue
-        
-                        next_week[day]["🟦"] = candidate
-                        night_assigned = True
-                        break
-        
-                    if not night_assigned:
-                        next_week[day]["🟦"] = BUFFER
-        
-                    # ─────────────────
-                    # Update night streaks (date-based)
-                    # ─────────────────
-                    today_night = next_week[day]["🟦"]
-        
-                    for p in night_streak:
-                        if p == today_night:
-                            night_streak[p] += 1
-                        else:
-                            night_streak[p] = 0
-        
-                    last_night_worker = today_night
-        
-                state.final_schedule.append(next_week)
-        
-            return state
-        --- CODE END ---
-    nodes/
-      conversation_controller.py
-        --- CODE START ---
-        import json
-        from app.llm.azure_client import client, DEPLOYMENT_NAME
-        
-        
-        SYSTEM_PROMPT = """
-        You are a conversational shift roster assistant.
-        
-        You must decide the NEXT action.
-        
-        CRITICAL RULES:
-        - If the user clearly asks to GENERATE or CREATE a schedule,
-          it means a NEW schedule, even if one already exists.
-        - In that case, reset the old schedule.
-        - NEVER ask to reconfirm information already provided in the same sentence.
-        - Ask only ONE question at a time.
-        - If pattern AND weeks are known → build schedule.
-        
-        Possible actions:
-        - ask_clarification
-        - build_schedule
-        - update_schedule
-        - explain
-        - idle
-        
-        Return ONLY valid JSON:
-        
+{
+    "id": null,
+    "created_at": null,
+    "error": null,
+    "incomplete_details": null,
+    "instructions": null,
+    "metadata": null,
+    "model": null,
+    "object": "response",
+    "output": [
         {
-          "action": "ask_clarification | build_schedule | update_schedule | explain | idle",
-          "message": "string or null",
-          "data": {
-            "pattern": "24x7 | 24x5 | 16x5 | null",
-            "weeks": number or null,
-            "leaves": {},
-            "holidays": []
-          }
+            "id": "msg_bdrk_01BCqf2er2o7Z9ydYYNcnqEu",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "I'll analyze the performance data for Store Woodward Avenue Exchange for Period 4-2025 to identify an alert and provide recommendations.",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "arguments": "{\"genie_query\": \"Analyze Store Woodward Avenue Exchange for Period 4-2025 (April 2025) compared to the previous period. Identify key performance metric changes including conversion rate, sales, and foot traffic. Drill down into product and category level to find root causes of any significant changes.\"}",
+            "call_id": "toolu_bdrk_01CMMBgTp9dxcGrC5RBf2u6V",
+            "name": "store-performance-analyzer",
+            "type": "function_call",
+            "id": "msg_bdrk_01BCqf2er2o7Z9ydYYNcnqEu",
+            "status": null,
+            "step": 1
+        },
+        {
+            "id": "73e717bf-b5b8-40ba-b2f9-88683f8fa188",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>store-performance-analyzer</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "a4bbdcfc-8a78-4469-a370-6e8abc151478",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "Genie query failed with error: {'error': \"\\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'WITH': extra input 'WITH'. SQLSTATE: 42601 (line 28, pos 0)\\n\\n== SQL ==\\n-- Store-level metric changes for Woodward Avenue Exchange\\nWITH StorePeriodMetrics AS (\\n  SELECT \\n    c.MonthNew, \\n    c.Conversion_Rate, \\n    c.Total_Sales, \\n    c.Total_Traffic\\n  FROM `point_solutions`.`gold_retail`.`mv_mthly_store_conversions` c\\n  WHERE c.Store_Name = 'Woodward Avenue Exchange' AND c.MonthNew IN ('4-2025', '3-2025')\\n),\\nMetricChange AS (\\n  SELECT \\n    MAX(CASE WHEN MonthNew = '3-2025' THEN Conversion_Rate END) AS Prev_Conversion_Rate,\\n    MAX(CASE WHEN MonthNew = '4-2025' THEN Conversion_Rate END) AS Curr_Conversion_Rate,\\n    MAX(CASE WHEN MonthNew = '3-2025' THEN Total_Sales END) AS Prev_Sales,\\n    MAX(CASE WHEN MonthNew = '4-2025' THEN Total_Sales END) AS Curr_Sales,\\n    MAX(CASE WHEN MonthNew = '3-2025' THEN Total_Traffic END) AS Prev_Traffic,\\n    MAX(CASE WHEN MonthNew = '4-2025' THEN Total_Traffic END) AS Curr_Traffic\\n  FROM StorePeriodMetrics\\n)\\nSELECT \\n  Prev_Conversion_Rate, Curr_Conversion_Rate, Curr_Conversion_Rate - Prev_Conversion_Rate AS Conversion_Rate_Change,\\n  Prev_Sales, Curr_Sales, Curr_Sales - Prev_Sales AS Sales_Change,\\n  Prev_Traffic, Curr_Traffic, Curr_Traffic - Prev_Traffic AS Traffic_Change\\nFROM MetricChange;\\n\\n-- Product and category drilldown for root cause\\nWITH ProductCategoryDrilldown AS (\\n^^^\\n  SELECT \\n    s.MonthNew,\\n    s.Product_Name,\\n    s.Category,\\n    SUM(s.Quantity_Sold) AS Total_Qty,\\n    SUM(s.Sales_Amount) AS Total_Sales\\n  FROM `point_solutions`.`gold_retail`.`mv_mthly_store_sales` s\\n  WHERE s.Store_Name = 'Woodward Avenue Exchange' AND s.MonthNew IN ('4-2025', '3-2025')\\n  GROUP BY s.MonthNew, s.Product_Name, s.Category\\n),\\nProductChange AS (\\n  SELECT \\n    p.Product_Name,\\n    p.Category,\\n    MAX(CASE WHEN p.MonthNew = '3-2025' THEN p.Total_Qty END) AS Prev_Qty,\\n    MAX(CASE WHEN p.MonthNew = '4-2025' THEN p.Total_Qty END) AS Curr_Qty,\\n    MAX(CASE WHEN p.MonthNew = '3-2025' THEN p.Total_Sales END) AS Prev_Sales,\\n    MAX(CASE WHEN p.MonthNew = '4-2025' THEN p.Total_Sales END) AS Curr_Sales\\n  FROM ProductCategoryDrilldown p\\n  GROUP BY p.Product_Name, p.Category\\n)\\nSELECT \\n  Product_Name, Category, Prev_Qty, Curr_Qty, Curr_Qty - Prev_Qty AS Qty_Change,\\n  Prev_Sales, Curr_Sales, Curr_Sales - Prev_Sales AS Sales_Change\\nFROM ProductChange\\nWHERE (Curr_Sales - Prev_Sales) <> 0 OR (Curr_Qty - Prev_Qty) <> 0\\nORDER BY Sales_Change DESC, Qty_Change DESC;\\n\", 'type': 'SQL_EXECUTION_EXCEPTION'}",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "eb81ed23-ef28-4ec4-b50f-0cf3dfd9313f",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>Store-Performance-Recommendation-Agent</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "msg_bdrk_013PYBiwhSP7Xs5mKGahY87R",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "Let me try a simpler query approach:",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "arguments": "{\"genie_query\": \"What is the conversion rate, total sales, and foot traffic for Woodward Avenue Exchange in April 2025 compared to March 2025?\"}",
+            "call_id": "toolu_bdrk_01ECaQ3u83QhEyAeZyZ8mwxf",
+            "name": "store-performance-analyzer",
+            "type": "function_call",
+            "id": "msg_bdrk_013PYBiwhSP7Xs5mKGahY87R",
+            "status": null,
+            "step": 2
+        },
+        {
+            "id": "b7f70131-0dd7-474f-8f1a-7996ae3d64e1",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>store-performance-analyzer</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "0106e8bc-83cb-4d52-ab4f-b6c8cfec71f0",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "|    | MonthNew   |   Conversion_Rate |   Total_Sales |   Total_Traffic |\n|---:|:-----------|------------------:|--------------:|----------------:|\n|  0 | 3-2025     |             24.71 |        850390 |             777 |\n|  1 | 4-2025     |             20.63 |        740959 |             800 |",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "5bcc5d9d-19bf-449c-a916-9d2f29303e49",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>Store-Performance-Recommendation-Agent</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "arguments": "{\"genie_query\": \"For Woodward Avenue Exchange, show product-level sales and quantity sold for April 2025 compared to March 2025, ordered by the largest changes in sales amount\"}",
+            "call_id": "toolu_bdrk_01GZ2tf84y1F9Hvi545drvBc",
+            "name": "store-performance-analyzer",
+            "type": "function_call",
+            "id": "msg_bdrk_016iARp4HBiXKZi67uiyaayN",
+            "status": null,
+            "step": 3
+        },
+        {
+            "id": "b1eee7fa-48ec-42cc-bfdf-4ffcd7db7bfc",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>store-performance-analyzer</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "cc820913-5a06-434d-ace1-c24bad8829cc",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "|    | Product_Name             |   sales_march |   sales_april |   qty_march |   qty_april |   sales_change |\n|---:|:-------------------------|--------------:|--------------:|------------:|------------:|---------------:|\n|  0 | CrimsonLine Raincoat 184 |       71081.6 |      102674   |          27 |          39 |        31591.9 |\n|  1 | TrailWorks Raincoat 173  |       82971.2 |       55314.2 |          33 |          22 |       -27657.1 |\n|  2 | TerraCore Sneaker 200    |      110799   |       96593.8 |          39 |          34 |       -14205   |\n|  3 | BlueRiver Sneaker 180    |       75385.7 |       88383.3 |          29 |          34 |        12997.5 |\n|  4 | ZenWear Sandal 004       |       43353.5 |       55224.2 |          84 |         107 |        11870.6 |\n|  5 | Solstice Polo 194        |       93695.9 |         nan   |          34 |         nan |          nan   |\n|  6 | Solstice Shirt 177       |       97162   |         nan   |          38 |         nan |          nan   |",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "6e2126ba-a471-47a1-b5a2-a038d78572d2",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>Store-Performance-Recommendation-Agent</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "arguments": "{\"genie_query\": \"For Woodward Avenue Exchange, what are the total sales by product category for April 2025 compared to March 2025?\"}",
+            "call_id": "toolu_bdrk_016r4rdx6s7ZvLz65GJqNEaH",
+            "name": "store-performance-analyzer",
+            "type": "function_call",
+            "id": "msg_bdrk_01Q1F6eytoNJAyeWMzDCx2QC",
+            "status": null,
+            "step": 4
+        },
+        {
+            "id": "df5aff1d-cf70-4b2a-913b-6a65b01551c4",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>store-performance-analyzer</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "1ec2d962-d411-4ad3-9b44-80a6ccd3313b",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "|    | MonthNew   | Category   |   Total_Sales |\n|---:|:-----------|:-----------|--------------:|\n|  0 | 3-2025     | Footwear   |      229538   |\n|  1 | 3-2025     | Outerwear  |      154053   |\n|  2 | 3-2025     | Tops       |      190858   |\n|  3 | 4-2025     | Bottoms    |       54073.6 |\n|  4 | 4-2025     | Footwear   |      240201   |\n|  5 | 4-2025     | Outerwear  |      157988   |",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "04ab85e9-60d6-4748-be6e-982ce4cfe3a6",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "<name>Store-Performance-Recommendation-Agent</name>",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
+        },
+        {
+            "id": "msg_bdrk_015fL6o54Eo3Gk8uSgPH2kXm",
+            "content": [
+                {
+                    "annotations": null,
+                    "text": "Based on my analysis of Store Woodward Avenue Exchange for Period 4-2025, here is the Alert and Recommendation:\n\n```json\n{\n  \"Alert\": \"Conversion rate decline detected in Store Woodward Avenue Exchange by 4.08 percentage points between March 2025 (24.71%) and April 2025 (20.63%), representing a 16.5% drop, despite a 3% increase in foot traffic\",\n  \"Impact\": \"Total sales decreased by $109,431 (from $850,390 to $740,959), representing a 12.9% decline. The store is converting fewer visitors into buyers even with more traffic, indicating operational or merchandising issues\",\n  \"Why\": \"Complete absence of Tops category sales in April 2025 (previously $190,858 in March). Key products like Solstice Polo 194 and Solstice Shirt 177, which generated $190,858 combined in March, had zero sales in April. This suggests severe stock-out issues in the Tops category\",\n  \"Actions\": [\n    \"Immediately investigate and resolve stock-out issues in the Tops category - prioritize restocking Solstice Polo and Solstice Shirt products\",\n    \"Conduct emergency inventory audit to identify root cause of missing Tops inventory (supply chain delay, ordering error, or system issue)\",\n    \"Implement daily inventory monitoring for high-performing products to prevent future stock-outs\",\n    \"Review merchandising mix - while Footwear sales increased slightly (+$10,663), it cannot compensate for the complete loss of Tops category\",\n    \"Coordinate with supply chain team to expedite Tops category replenishment within 48 hours\",\n    \"Consider temporary promotional signage for available categories (Footwear, Outerwear) to maximize conversion while Tops inventory is restored\"\n  ]\n}\n```\n\n**Summary:** The critical issue at Woodward Avenue Exchange is a complete disappearance of the Tops category from sales in April 2025, which accounted for $190,858 (22% of total sales) in March. This stock-out is the primary driver of both the conversion rate decline and overall sales drop, and requires immediate inventory intervention.",
+                    "type": "output_text",
+                    "logprobs": null
+                }
+            ],
+            "role": "assistant",
+            "status": null,
+            "type": "message"
         }
-        """
-        
-        
-        def conversation_controller(state):
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            messages.extend(state.conversation_history)
-        
-            messages.append({
-                "role": "user",
-                "content": f"""
-        User input: {state.user_input}
-        
-        Confirmed:
-        - pattern: {state.pattern}
-        - weeks: {state.weeks}
-        - weeks_confirmed: {state.weeks_confirmed}
-        - schedule_exists: {bool(state.final_schedule)}
-        """
-            })
-        
-            response = client.chat.completions.create(
-                model=DEPLOYMENT_NAME,
-                messages=messages,
-                temperature=0,
-            )
-        
-            decision = json.loads(response.choices[0].message.content)
-        
-            action = decision["action"]
-            data = decision.get("data", {})
-            message = decision.get("message")
-        
-            # ─────────────────────────────
-            # 🔥 HARD RESET for NEW schedule
-            # ─────────────────────────────
-            if action == "build_schedule" and state.final_schedule:
-                state.final_schedule.clear()
-                state.adjustment_log.clear()
-                state.holidays.clear()
-                state.leaves.clear()
-                state.pattern = None
-                state.weeks = 0
-                state.weeks_confirmed = False
-        
-            # ─────────────────────────────
-            # Update state from LLM
-            # ─────────────────────────────
-            if data.get("pattern"):
-                state.pattern = data["pattern"]
-        
-            if data.get("weeks") is not None:
-                state.weeks = data["weeks"]
-                state.weeks_confirmed = True
-        
-            if data.get("leaves"):
-                state.leaves.update(data["leaves"])
-        
-            if data.get("holidays"):
-                state.holidays.extend(data["holidays"])
-        
-            # ─────────────────────────────
-            # Decide next node
-            # ─────────────────────────────
-            if action == "ask_clarification":
-                state.final_output = message
-                state.next_node = "render"
-        
-            elif action == "build_schedule":
-                state.next_node = "parse"
-        
-            elif action == "update_schedule":
-                state.next_node = "leave"
-        
-            else:
-                state.next_node = "render"
-        
-            return state
-        --- CODE END ---
-      dispatch.py
-        --- CODE START ---
-        def dispatch(state):
-            """
-            Decide whether we are building a new schedule
-            or editing an existing one.
-            """
-        
-            if state.intent_type == "create_schedule":
-                return {"mode": "build"}
-        
-            if state.intent_type in {"add_holiday", "add_leave", "update_weeks"}:
-                if not state.final_schedule:
-                    state.final_output = (
-                        "I couldn't find an existing schedule. "
-                        "Please generate a schedule first."
-                    )
-                    return {"mode": "stop"}
-                return {"mode": "edit"}
-        
-            # fallback
-            state.final_output = (
-                "I didn’t understand that. "
-                "Try: generate 24x7 for 2 weeks."
-            )
-            return {"mode": "stop"}
-        --- CODE END ---
-      input_gate.py
-        --- CODE START ---
-        def ask_initial_question(state):
-            # If input is missing, stop execution by raising
-            if not state.user_input:
-                raise ValueError(
-                    "Do you want 24×7, 24×5, or 16×5, and for how many weeks?"
-                )
-            return {}
-        --- CODE END ---
-      intent_router.py
-        --- CODE START ---
-        def route_by_intent(state):
-            intent = state.intent.intent_type
-        
-            if intent == "greeting":
-                state.final_output = "Do you want 24×7, 24×5, or 16×5, and for how many weeks?"
-                return "render"
-        
-            if intent == "create_schedule":
-                return "parse"
-        
-            if intent == "add_leave":
-                return "apply_leave"
-        
-            return "render"
-        --- CODE END ---
-      llm_intent.py
-        --- CODE START ---
-        def llm_intent_node(state):
-            # Conversation is now handled by conversation_controller
-            return state
-        --- CODE END ---
-      output_llm.py
-        --- CODE START ---
-        def format_output_llm(state):
-            prompt = f"""
-        Format this schedule nicely.
-        Replace IDs with names.
-        Do not change assignments.
-        
-        Schedule:
-        {state.final_output}
-        """
-            response = llm.invoke(prompt)
-            state.final_output = response.content
-            return state
-        --- CODE END ---
-      parser.py
-        --- CODE START ---
-        def parse_input(state):
-            """
-            LLM already decided we have enough info.
-            This node just passes control forward.
-            """
-            return state
-        --- CODE END ---
-      renderer.py
-        --- CODE START ---
-        from app.llm.output_formatter import format_schedule
-        
-        
-        def render_output(state):
-            """
-            Renders either:
-            - clarification / conversational response
-            - or full shift roster
-            """
-        
-            # ─────────────────────────────
-            # Case 1: Explicit response already set
-            # ─────────────────────────────
-            if state.final_output:
-                return {
-                    "final_output": state.final_output
-                }
-        
-            # ─────────────────────────────
-            # Case 2: No schedule yet → conversational fallback
-            # ─────────────────────────────
-            if not state.final_schedule:
-                return {
-                    "final_output": (
-                        "Hi 👋 I can help you generate and manage shift rosters.\n\n"
-                        "You can say things like:\n"
-                        "• Generate 24x7 for 2 weeks\n"
-                        "• Generate 24x5\n"
-                        "• Add holiday on 15 Jan\n"
-                        "• P2 on leave Wednesday"
-                    )
-                }
-        
-            # ─────────────────────────────
-            # Case 3: Markdown table schedule rendering
-            # ─────────────────────────────
-            output_lines = []
-            start_date = state.start_date
-        
-            for week_index, week in enumerate(state.final_schedule, start=1):
-                output_lines.append(f"\n### 📅 Week {week_index}\n")
-                output_lines.append("| Day | Date | Morning (🟨) | Afternoon (🟧) | Night (🟦) |")
-                output_lines.append("|-----|------|--------------|----------------|-----------|")
-        
-                for day, shifts in week.items():
-                    date_str = start_date.strftime("%d %b %Y")
-                    start_date += state.day_delta
-        
-                    def fmt(val):
-                        if isinstance(val, list):
-                            return ", ".join(val)
-                        return val if val else "-"
-        
-                    morning = fmt(shifts.get("🟨"))
-                    afternoon = fmt(shifts.get("🟧"))
-                    night = fmt(shifts.get("🟦")) if state.pattern != "16x5" else "-"
-        
-                    output_lines.append(
-                        f"| {day} | {date_str} | {morning} | {afternoon} | {night} |"
-                    )
-        
-            # Adjustment log
-            if state.adjustment_log:
-                output_lines.append("\n### 🔧 Adjustment Log\n")
-                for log in state.adjustment_log:
-                    output_lines.append(f"- {log}")
-        
-            final_text = "\n".join(output_lines)
-            final_text = format_schedule(final_text)
-        
-            final_text += "\n\nWould you like to add leaves, holidays, or make changes?"
-        
-            return {"final_output": final_text}
-        --- CODE END ---
-      router.py
-        --- CODE START ---
-        def route_pattern(state):
-            if state.pattern == "24x7":
-                return "pattern_a"
-            if state.pattern == "24x5":
-                return "pattern_b"
-            return "pattern_c"
-        --- CODE END ---
-      validator.py
-        --- CODE START ---
-        DAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        
-        
-        def validate_schedule(state):
-            if not isinstance(state.final_schedule, list):
-                raise TypeError(
-                    f"final_schedule must be list, got {type(state.final_schedule)}"
-                )
-        
-            for w, week in enumerate(state.final_schedule, start=1):
-                if not isinstance(week, dict):
-                    raise TypeError(f"Week {w} must be dict")
-        
-                for day in DAY_ORDER:
-                    shifts = week.get(day)
-                    if not shifts:
-                        raise ValueError(f"Missing day {day} in Week {w}")
-        
-                    for shift in ["🟨", "🟧"]:
-                        if shift not in shifts:
-                            raise ValueError(f"Missing {shift} in Week {w}, {day}")
-                        if isinstance(shifts[shift], list):
-                            raise ValueError(
-                                f"Overlap not allowed in Week {w}, {day}, {shift}"
-                            )
-        
-                    if "🟦" not in shifts:
-                        raise ValueError(f"Night shift missing in Week {w}, {day}")
-        
-            return state
-        --- CODE END ---
-    patterns/
-      pattern_a_24x7.py
-        --- CODE START ---
-        # def build_pattern_a(state):
-        #     """
-        #     SECTION 1 — 24x7
-        #     Week 1 base pattern (anchor week).
-        #     Overlaps allowed ONLY in this week.
-        #     """
-        #
-        #     week1 = {
-        #         "Mon": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-        #         "Tue": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-        #         "Wed": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-        #         "Thu": {"🟨": "P2", "🟧": "P4", "🟦": "P1"},
-        #         "Fri": {"🟨": "P2", "🟧": "P4", "🟦": "P1"},
-        #         "Sat": {"🟨": "P3", "🟧": "P5", "🟦": "P1"},
-        #         "Sun": {"🟨": "P3", "🟧": "P5", "🟦": "P1"},
-        #     }
-        #
-        #     state.final_schedule = [week1]
-        #     return state
-        
-        
-        
-        # def build_pattern_a(state):
-        #     """
-        #     Section 1 – 24x7 base pattern (Week 1)
-        #     """
-        #     week1 = {
-        #         "Mon": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-        #         "Tue": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-        #         "Wed": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-        #         "Thu": {"🟨": "P2", "🟧": "P4", "🟦": "P1"},
-        #         "Fri": {"🟨": "P2", "🟧": "P4", "🟦": "P1"},
-        #         "Sat": {"🟨": "P3", "🟧": "P5", "🟦": "P1"},
-        #         "Sun": {"🟨": "P3", "🟧": "P5", "🟦": "P1"},
-        #     }
-        #
-        #     state.final_schedule = [week1]
-        #
-        #     state.night_streak = {"P1": 7}
-        #
-        #     return state
-        
-        
-        def build_pattern_a(state):
-            """
-            24×7 BASE PATTERN (Week-1)
-            HARD RULES:
-            - Max 5 consecutive Nights
-            - Single person per shift
-            """
-        
-            week1 = {
-                "Mon": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-                "Tue": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-                "Wed": {"🟨": "P2", "🟧": "P3", "🟦": "P1"},
-                "Thu": {"🟨": "P2", "🟧": "P4", "🟦": "P1"},
-                "Fri": {"🟨": "P2", "🟧": "P4", "🟦": "P1"},
-        
-                # 🔁 Night rotates after 5
-                "Sat": {"🟨": "P3", "🟧": "P5", "🟦": "P2"},
-                "Sun": {"🟨": "P3", "🟧": "P5", "🟦": "P2"},
-            }
-        
-            state.final_schedule = [week1]
-            return state
-        --- CODE END ---
-      pattern_b_24x5.py
-        --- CODE START ---
-        def build_pattern_b(state):
-            week1 = {}
-        
-            for day in ["Mon", "Tue", "Wed", "Thu", "Fri"]:
-                week1[day] = {
-                    "🟨": "P2",
-                    "🟧": "P3",
-                    "🟦": "P1"
-                }
-        
-            state.final_schedule = [week1]
-            return state
-        --- CODE END ---
-      pattern_c_16x5.py
-        --- CODE START ---
-        def build_pattern_c(state):
-            week1 = {}
-        
-            for day in ["Mon", "Tue", "Wed", "Thu", "Fri"]:
-                week1[day] = {
-                    "🟨": "P1",
-                    "🟧": "P2"
-                }
-        
-            state.final_schedule = [week1]
-            return state
-        --- CODE END ---
-    schemas/
-      intent.py
-        --- CODE START ---
-        from typing import Optional, List, Dict
-        from pydantic import BaseModel
-        
-        class LeaveIntent(BaseModel):
-            name: str
-            date: str  # ISO format preferred
-        
-        class Intent(BaseModel):
-            intent_type: str  # greeting | create_schedule | add_leave | update | unknown
-            service_type: Optional[str] = None  # 24x7 | 24x5 | 16x5
-            weeks: Optional[int] = None
-            leaves: List[LeaveIntent] = []
-            confidence: float
-        --- CODE END ---
-    utils/
-      dates.py
-        --- CODE START ---
-        from datetime import datetime, timedelta
-        import pytz
-        
-        IST = pytz.timezone("Asia/Kolkata")
-        
-        def get_monday_of_current_week():
-            today = datetime.now(IST).date()
-            return today - timedelta(days=today.weekday())
-        
-        def generate_week_dates(start_monday, weeks=1):
-            dates = []
-            for w in range(weeks):
-                for d in range(7):
-                    dates.append(start_monday + timedelta(days=w * 7 + d))
-            return dates
-        --- CODE END ---
-      helpers.py
-        --- CODE START ---
-        --- CODE END ---
+    ],
+    "parallel_tool_calls": null,
+    "temperature": null,
+    "tool_choice": null,
+    "tools": null,
+    "top_p": null,
+    "background": null,
+    "completed_at": null,
+    "conversation": null,
+    "max_output_tokens": null,
+    "max_tool_calls": null,
+    "previous_response_id": null,
+    "prompt": null,
+    "prompt_cache_key": null,
+    "prompt_cache_retention": null,
+    "reasoning": null,
+    "safety_identifier": null,
+    "service_tier": null,
+    "status": null,
+    "text": null,
+    "top_logprobs": null,
+    "truncation": null,
+    "usage": null,
+    "user": null,
+    "custom_outputs": null
+}
